@@ -58,6 +58,7 @@ DATA_DIR = '/scratch1/williamljb/hmr_multiview/tf_datasets/'
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
 flags.DEFINE_string('log_dir', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
+flags.DEFINE_string('out_dir', 'results', 'Where result images will be saved')
 flags.DEFINE_integer('log_img_step', 100, 'How often to visualize img during training')
 flags.DEFINE_integer('epoch', 100, '# of epochs to train')
 
@@ -115,6 +116,7 @@ def prepare_dirs(config, prefix=['HMR']):
     if config.load_path:
         if not osp.exists(config.load_path):
             print("load_path: %s doesnt exist..!!!" % config.load_path)
+            print("SOMETHING!!!")
             import ipdb
             ipdb.set_trace()
         print('continuing from %s!' % config.load_path)

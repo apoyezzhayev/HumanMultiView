@@ -21,6 +21,7 @@ class RunModel(object):
         """
         self.config = config
         self.load_path = config.load_path
+        print('Load path' , self.load_path)
         
         # Config + path
         if not config.load_path:
