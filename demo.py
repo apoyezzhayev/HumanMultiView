@@ -19,6 +19,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from warnings import warn
+
 import matplotlib
 
 matplotlib.use('Agg')
@@ -30,6 +32,7 @@ from pathlib2 import Path
 import src_ortho.config
 import skimage.io as io
 import tensorflow as tf
+from tqdm import tqdm
 
 # src_ortho
 from src_ortho.util import renderer as vis_util
@@ -39,7 +42,9 @@ from src_ortho.RunModel import RunModel
 import os
 from src_ortho.tf_smpl.batch_smpl import SMPL
 import pickle
-
+import json
+from pathlib2 import Path
+import pandas as pd
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 flags.DEFINE_string('img_paths', 'data/im1963.jpg', 'Images to run, can be multi-view, separated by comma')
@@ -96,7 +101,7 @@ def measure(theta, oriverts):
     #     f.write('\n')
 
 
-def visualize(input_imgs, imgs, proc_params, jointss, vertss, cams, view, out_img_dir):
+def visualize(input_imgs, imgs, proc_params, jointss, vertss, cams, view, out_img_dir, img_name):
     """
     Renders the result in original image coordinate frame.
     """
@@ -151,9 +156,10 @@ def visualize(input_imgs, imgs, proc_params, jointss, vertss, cams, view, out_im
     plt.axis('off')
     plt.draw()
     plt.show()
-    plt.savefig(os.path.join(out_img_dir, 'res.png'))
+
+    plt.savefig(out_name(str(out_img_dir), img_name, '_res.png'))
     # io.imsave('ori{}.png'.format(view),img)
-    io.imsave(os.path.join(out_img_dir, 'ours{}.png'.format(view)), rend_img_overlay)  # rend_img[:,:,:3])#
+    io.imsave(out_name(str(out_img_dir), img_name, 'ours{}.png'.format(view)), rend_img_overlay)  # rend_img[:,:,:3])#
     # import ipdb
     # ipdb.set_trace()
     # for i in range(126):
@@ -172,7 +178,7 @@ def visualize(input_imgs, imgs, proc_params, jointss, vertss, cams, view, out_im
     #         f.write("{}".format(lines))
 
 
-def preprocess_image(img_path, json_path=None, view=0, out_img_dir='results/'):
+def preprocess_image(img_path, json_path=None, view=0, out_img_dir=None):
     img = io.imread(img_path)
     if img.shape[2] == 4:
         img = img[:, :, :3]
@@ -203,7 +209,8 @@ def preprocess_image(img_path, json_path=None, view=0, out_img_dir='results/'):
     # st=int(80./224*ori.shape[0])
     # en=int(144./224*ori.shape[1])
     # ori[st:en,st:en]=0
-    io.imsave(os.path.join(out_img_dir, 'ori{}.png'.format(view)), ori)
+    if out_img_dir is not None:
+        io.imsave(os.path.join(out_img_dir, 'ori{}.png'.format(view)), ori)
 
     # Normalize image to [-1, 1]
     crop = 2 * ((crop / 255.) - 0.5)
@@ -220,38 +227,62 @@ def clip(x):
     maxi = 1
     return np.clip(x * (x > 0), mini, maxi) * (x > 0) + np.clip(x * (x < 0), -maxi, -mini) * (x < 0)
 
-
+# TODO: rewrite this shit
 def main(img_paths, json_path=None, out_dir='results'):
+    if config.img_paths.endswith('.csv'):
+        csv = pd.read_csv(config.img_paths)
+    else:
+        raise NotImplementedError
+        # paths = img_paths.split(',')
+        # num_views = len(paths)
     sess = tf.Session()
-    paths = img_paths.split(',')
-    num_views = len(paths)
+
+    num_views = 1
     model = RunModel(config, 4, num_views, sess=sess)
-    input_imgs, proc_params, imgs = [], [], []
+    for ind, item in tqdm(csv.iterrows(), desc='Creating avatars'):
+        tqdm.write('Creating avatar for %s' % item.img_path)
+        out_dir = Path(out_dir)
+        paths = [Path(item.img_path)]
+        json_path = Path(item.kp_path)
+        dump_path = out_name(out_dir, paths[0], suffix='_verts.pkl')
 
-    for i, path in enumerate(paths):
-        input_img, proc_param, img = preprocess_image(path, json_path, i, out_dir)
-        input_imgs.append(input_img)
-        proc_params.append(proc_param)
-        imgs.append(img)
-    # Add batch dimension: 1 x D x D x 3
-    # return
-    input_imgs = np.expand_dims(np.array(input_imgs), 0)
+        if Path(dump_path).exists():
+            tqdm.write('Avatar is already created')
+            continue
 
-    joints, verts, cams, joints3d, theta = model.predict(
-        input_imgs, get_theta=True)
-    measure(theta[0][0], verts[0][0])  # view, batch
-    np.set_printoptions(precision=5, suppress=True)
-    # print(theta[0][0][3:75].reshape((24,3)))
-    # print(theta[0][0][-10:])
-    # print(joints3d[0])
-    # verts = clip((verts - joints3d[0][0,5,:]) / 100) + joints3d[0][0,5,:]
-    dump_path = os.path.join(out_dir,'verts.pkl')
-    with open(dump_path, 'wb') as f:
-        print('Vertices dump was written to %s' % dump_path)
-        pickle.dump(verts, f)
-    for i in range(num_views):
-        visualize(input_imgs, imgs, proc_params, joints, verts, cams, i, out_dir)
+        input_imgs, proc_params, imgs = [], [], []
+        for view, path in enumerate(paths):
+            input_img, proc_param, img = preprocess_image(str(path), str(json_path), view)
+            input_imgs.append(input_img)
+            proc_params.append(proc_param)
+            imgs.append(img)
+        # Add batch dimension: 1 x D x D x 3
+        # return
+        input_imgs = np.expand_dims(np.array(input_imgs), 0)
 
+        joints, verts, cams, joints3d, theta = model.predict(
+            input_imgs, get_theta=True)
+        measure(theta[0][0], verts[0][0])  # view, batch
+        np.set_printoptions(precision=5, suppress=True)
+        # print(theta[0][0][3:75].reshape((24,3)))
+        # print(theta[0][0][-10:])
+        # print(joints3d[0])
+        # verts = clip((verts - joints3d[0][0,5,:]) / 100) + joints3d[0][0,5,:]
+
+        # dump_path = os.path.join(out_dir, img_paths[0].with_suffix('').name + '_verts.pkl')
+        with open(dump_path, 'wb') as f:
+            tqdm.write('Vertices dump was written to %s' % dump_path)
+            pickle.dump(verts, f)
+        for view in range(num_views):
+            visualize(input_imgs, imgs, proc_params, joints, verts, cams, view, out_dir, paths[0])
+
+def out_name(out_dir, img_path, suffix=''):
+    shop_name = img_path.parent.name
+    out_path = os.path.join(str(out_dir), str(shop_name), str(img_path.with_suffix('').name + suffix))
+    if not os.path.exists(out_path):
+        Path(out_path).parent.mkdir(exist_ok=True, parents=True)
+    # print(out_dir, shop_name, img_path.with_suffix('').name + suffix)
+    return out_path
 
 if __name__ == '__main__':
     config = flags.FLAGS
@@ -263,5 +294,4 @@ if __name__ == '__main__':
     Path(config.out_dir).mkdir(exist_ok=True, parents=True)
 
     renderer = vis_util.SMPLRenderer(face_path=config.smpl_face_path)
-    print(config.out_dir)
-    main(config.img_paths, config.json_path, out_dir=config.out_dir)
+    main(Path(config.img_paths), config.json_path, out_dir=config.out_dir)
