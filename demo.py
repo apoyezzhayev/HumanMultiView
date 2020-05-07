@@ -243,7 +243,7 @@ def main(img_paths, json_path=None, out_dir='results'):
         tqdm.write('Creating avatar for %s' % item.img_path)
         out_dir = Path(out_dir)
         paths = [Path(item.img_path)]
-        json_path = Path(item.kp_path)
+        json_path = Path(item.annot_path)
         dump_path = out_name(out_dir, paths[0], suffix='_verts.pkl')
 
         if Path(dump_path).exists():
